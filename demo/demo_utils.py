@@ -1,5 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from PIL import Image
+import PIL
+from dh import ift2, ft2
 
 
 def imshow_hi_res(array, title='', vmin=None, vmax=None, cmap='viridis', show=False):
@@ -39,3 +42,89 @@ def have_same_shape(array1, array2):
     Check if two arrays have the same shape - return True if so, false if not.
     """
     return np.allclose(np.array(array1.shape), np.array(array2.shape))
+
+
+def make_flat_image(shape, fname):
+    arr = np.zeros(shape) + 50
+    im = Image.fromarray(arr)
+    im = im.convert("L")
+    im.save(fname)
+
+def get_center(img, diam):
+    l = np.shape(img)[0]
+    overlap = l - diam
+    start = int(overlap // 2)
+    end = int(overlap // 2 + diam)
+    return img[start:end, start:end]
+
+def new_ang_spec_multi_prop(Uin, wvl, delta1, deltan, z, exp_jt, startpoint=False, endpoint=False):
+    """
+    Propagate field through a series of phase screens
+    Args:
+        Uin (ndarray): Signal to propagate through space
+        wvl (float): Wavelength of the light propagating through space [m]
+        delta1 (float): Object plane grid spacing [m]
+        deltan (float): Pupil plane grid spacing [m]
+        z (ndarray): 1-D array containing the locations of each propagation plane [m]
+        exp_jt (ndarray): (nplanes,Nprop,Nprop) Phase distortion screens in complex form, e.g. exp(1j*t)
+        startpoint: True if phase screen is at first propagation plane location (z[0])
+        endpoint: True if phase screen is at last propagation plane location z[-1]
+    Returns:
+        Uout (ndarray): Output signal from propagation
+        xn (ndarray): x-coordinate grid [samples]
+        yn (ndarray): y-coordinate grid [samples]
+    """
+    # add dimension if there's only one phase screen
+    scrn_size = exp_jt.shape
+    if exp_jt.ndim == 2:
+        exp_jt = exp_jt[np.newaxis, :, :]
+
+
+    if not startpoint:
+        exp_jt = np.concatenate((np.ones((1,scrn_size[-2],scrn_size[-1])), exp_jt), axis=0)
+    if not endpoint:
+        exp_jt = np.concatenate((exp_jt, np.ones((1,scrn_size[-2],scrn_size[-1]))), axis=0)
+
+    N = Uin.shape[0]  # number of grid points
+    x = np.arange(-N / 2, N / 2)
+    nx, ny = np.meshgrid(x, x)
+    k = 2 * np.pi / wvl  # optical wave vector
+    # super-Gaussian absorbing boundary
+    # nsq = nx**2 + ny**2
+    # w = .49*N
+    # sg = np.exp(np.power(-nsq,8)/w**16)
+    sg = np.ones((N, N))
+
+    n = len(z)
+    Delta_z = z[1:n] - z[0:n - 1]  # propagation distances
+    alpha = z / z[-1]
+    delta = (1 - alpha) * delta1 + alpha * deltan
+    m = delta[1:n] / delta[0:n - 1]
+    x1 = nx * delta[0]
+    y1 = ny * delta[0]
+    r1sq = x1 ** 2 + y1 ** 2
+    Q1 = np.exp(1j * k / 2 * (1 - m[0]) / Delta_z[0] * r1sq)
+
+
+    Uin = Uin * Q1 * exp_jt[0]
+
+    for idx in range(n - 1):
+        # spatial frequencies (of i^th plane)
+        deltaf = 1 / (N * delta[idx])
+        fX = nx * deltaf
+        fY = ny * deltaf
+        fsq = fX ** 2 + fY ** 2
+        Z = Delta_z[idx]  # propagation distance
+        Q2 = np.exp(-1j * np.pi ** 2 * 2 * Z / m[idx] / k * fsq)  # quadratic phase factor
+
+        # compute the propagated field
+        Uin = sg * exp_jt[idx + 1] * ift2(Q2 * ft2(Uin / m[idx], delta[idx] ** 2), (N * deltaf) ** 2)
+
+    # observation-plane coordinates
+    xn = nx * delta[-1]
+    yn = ny * delta[-1]
+    rnsq = xn ** 2 + yn ** 2
+    Q3 = np.exp(1j * k / 2 * (m[-1] - 1) / (m[-1] * Z) * rnsq)
+    Uout = Q3 * Uin
+
+    return Uout, xn, yn
