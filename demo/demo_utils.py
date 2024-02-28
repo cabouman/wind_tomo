@@ -2,7 +2,32 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 import PIL
-from dh import ift2, ft2
+from dh import ft2, ift2
+
+#copied from SVMBIR
+def plot_image(img, title=None, filename=None, vmin=None, vmax=None):
+    """
+    Function to display and save a 2D array as an image.
+
+    Args:
+        img: 2D numpy array to display
+        title: Title of plot image
+        filename: A path to save plot image
+        vmin: Value mapped to black
+        vmax: Value mapped to white
+    """
+
+    plt.ion()
+    fig = plt.figure()
+    imgplot = plt.imshow(img, vmin=vmin, vmax=vmax)
+    plt.title(label=title)
+    imgplot.set_cmap('gray')
+    plt.colorbar()
+    if filename != None:
+        try:
+            plt.savefig(filename)
+        except:
+            print("plot_image() Warning: Can't write to file {}".format(filename))
 
 
 def imshow_hi_res(array, title='', vmin=None, vmax=None, cmap='viridis', show=False):
