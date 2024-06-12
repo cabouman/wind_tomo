@@ -12,8 +12,8 @@ from skimage.restoration import unwrap_phase
 diam=200
 
 #circle of 100s
-# xx, yy = np.mgrid[:diam, :diam]
-# Img = np.array(circ(xx-diam/2,yy-diam/2,diam))*100
+xx, yy = np.mgrid[:diam, :diam]
+Img = np.array(circ(xx-diam/2,yy-diam/2,diam))*100
 
 #AFRL sample image
 Img=load_img(None, diam)+1
