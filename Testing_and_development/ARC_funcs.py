@@ -1,6 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from math import floor, ceil
+from scipy.interpolate import PchipInterpolator, CubicSpline
+
+
 def gen_wind_tunnel3(num_slices, num_rows, num_cols, left_freq, right_freq, center_rod=False,make_square=False):
     """
     Generate a phantom cheaply mimicking a wind tunnel
@@ -128,6 +131,39 @@ def sino_window_and_circ_block(sinogram,angles,diameters,window_dim):
         newsino[i,:,highInd:]=0
 
         newsino[i,:,:]=circ_block(newsino[i,:,:],diameters[i])
+
+    return newsino
+
+def JAX_sino_window_and_circ_block(sinogram,angles,diameters,window_dim):
+    """
+    Modify a sinogram to simulate CT through window
+
+    Args:
+        sinogram(ndarray): 2D sinogram
+        angles(ndarray): 1D numpy array of angles corresponding to the sinogram views
+        num_rows(int): number of rows in original image
+        num_cols(int): number of cols in original image
+    Return:
+        newsinogram(ndarray): 2D sinogram with regions set to zero were window edges would block
+
+    """
+    num_rows, num_cols = window_dim #(# of slices, # of channels)
+    #make copy
+    newsino=sinogram.copy()
+    num_channel=newsino.shape[2]
+    #find center index
+    center=num_channel/2 # This will need to be changed eventually to accommodate a different center of rotation.
+    for i,theta in enumerate(angles):
+        #find FOV length
+        d=num_rows*np.cos(theta) - num_cols*np.sin(abs(theta))
+        #determine middle section
+        lowInd= int(round(center - d/2))
+        highInd= int(round(center + d/2))+1
+        # set lower and upper sections to zero
+        newsino=newsino.at[i,:,:lowInd].set(0)
+        newsino=newsino.at[i,:,highInd:].set(0)
+
+        newsino=newsino.at[i,:,:].set(circ_block(newsino[i,:,:],diameters[i]))
 
     return newsino
 
