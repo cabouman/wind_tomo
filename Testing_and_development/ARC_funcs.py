@@ -4,7 +4,7 @@ from math import floor, ceil
 from scipy.interpolate import PchipInterpolator, CubicSpline
 
 
-def gen_wind_tunnel3(num_slices, num_rows, num_cols, left_freq, right_freq, center_rod=False,make_square=False):
+def gen_wind_tunnel3(num_slices, num_rows, num_cols, left_freq=14, right_freq=16, center_rod=False,make_square=False):
     """
     Generate a phantom cheaply mimicking a wind tunnel
 
@@ -101,12 +101,56 @@ def circ_block(view,diameter,center_offset=(0,0)):
     circ = (r<=diameter/2)*1
     return circ*view
 
-def sino_window_and_circ_block(sinogram,angles,diameters,window_dim):
+def multi_circ_block(view,diameter,num_stack=1,stack_offset=0):
+    circ = 0
+    H, W = view.shape
+    x, y = np.mgrid[:H, :W]
+    stack_positions = [j * stack_offset - (num_stack - 1) * stack_offset / 2 for j in range(num_stack)]
+    for y_pos in stack_positions:
+        center=(view.shape[0]//2,view.shape[1]//2+y_pos)
+        r = np.sqrt((x-center[0])**2 + (y-center[1])**2)
+        circ += (r<=diameter/2)*1
+    return view*(circ>0)
+
+# def sino_window_and_circ_block(sinogram,angles,diameters,window_dim):
+#     """
+#     Modify a sinogram to simulate CT through window
+#
+#     Args:
+#         sinogram(ndarray): 3D sinogram
+#         angles(ndarray): 1D numpy array of angles corresponding to the sinogram views
+#         num_rows(int): number of rows in original image
+#         num_cols(int): number of cols in original image
+#     Return:
+#         newsinogram(ndarray): 2D sinogram with regions set to zero were window edges would block
+#
+#     """
+#     num_rows, num_cols = window_dim #(# of slices, # of channels)
+#     #make copy
+#     newsino=sinogram.copy()
+#     num_channel=newsino.shape[2]
+#     #find center index
+#     center=num_channel/2 # This will need to be changed eventually to accommodate a different center of rotation.
+#     for i,theta in enumerate(angles):
+#         #find FOV length
+#         d=num_rows*np.cos(theta) - num_cols*np.sin(abs(theta))
+#         #determine middle section
+#         lowInd= int(round(center - d/2))
+#         highInd= int(round(center + d/2))+1
+#         # set lower and upper sections to zero
+#         newsino[i,:,:lowInd]=0
+#         newsino[i,:,highInd:]=0
+#
+#         newsino[i,:,:]=circ_block(newsino[i,:,:],diameters[i])
+#
+#     return newsino
+
+def sino_window_and_circ_block(sinogram,angles,diameter,window_dim,num_stack=1,stack_offset=0):
     """
     Modify a sinogram to simulate CT through window
 
     Args:
-        sinogram(ndarray): 2D sinogram
+        sinogram(ndarray): 3D sinogram
         angles(ndarray): 1D numpy array of angles corresponding to the sinogram views
         num_rows(int): number of rows in original image
         num_cols(int): number of cols in original image
@@ -129,8 +173,10 @@ def sino_window_and_circ_block(sinogram,angles,diameters,window_dim):
         # set lower and upper sections to zero
         newsino[i,:,:lowInd]=0
         newsino[i,:,highInd:]=0
+        oldsino=newsino.copy()
 
-        newsino[i,:,:]=circ_block(newsino[i,:,:],diameters[i])
+        # do beam circle thing
+        newsino[i,:,:]+=multi_circ_block(oldsino[i,:,:],diameter,num_stack,stack_offset)
 
     return newsino
 
