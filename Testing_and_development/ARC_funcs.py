@@ -33,11 +33,11 @@ def gen_wind_tunnel3(num_slices, num_rows, num_cols, left_freq=14, right_freq=16
     #add left squiggle
     image += ( (
             x_grid <= right_amp * np.sin(y_grid * 2 * np.pi * right_freq / 4) + right_mid+right_thick) & (
-                      x_grid >= 0.1 * np.sin(y_grid * 2 * np.pi * right_freq / 4) + right_mid-right_thick)) * 2
+                      x_grid >= 0.1 * np.sin(y_grid * 2 * np.pi * right_freq / 4) + right_mid-right_thick)) * 5
     #add right squiggle
     image += ( (
             x_grid >= left_amp * np.sin(y_grid * 2 * np.pi * left_freq / 4) + left_mid - left_thick) & (
-                      x_grid <= 0.05 * np.sin(y_grid * 2 * np.pi * left_freq / 4) + left_mid + left_thick)) * 2
+                      x_grid <= 0.05 * np.sin(y_grid * 2 * np.pi * left_freq / 4) + left_mid + left_thick)) * 5
     #add center rod
     if center_rod:
         image += (((x_grid<=0.01) & (x_grid>=-0.01)) & ((y_grid<=0.01) & (y_grid>=-0.01)))*3
@@ -101,13 +101,13 @@ def circ_block(view,diameter,center_offset=(0,0)):
     circ = (r<=diameter/2)*1
     return circ*view
 
-def multi_circ_block(view,diameter,num_stack=1,stack_offset=0):
+def multi_circ_block(view,diameter,num_stack=1,stack_offset=0, left_right_offset=0):
     circ = 0
     H, W = view.shape
     x, y = np.mgrid[:H, :W]
     stack_positions = [j * stack_offset - (num_stack - 1) * stack_offset / 2 for j in range(num_stack)]
     for y_pos in stack_positions:
-        center=(view.shape[0]//2,view.shape[1]//2+y_pos)
+        center=(view.shape[0]//2+y_pos,view.shape[1]//2+left_right_offset)
         r = np.sqrt((x-center[0])**2 + (y-center[1])**2)
         circ += (r<=diameter/2)*1
     return view*(circ>0)
@@ -145,7 +145,7 @@ def multi_circ_block(view,diameter,num_stack=1,stack_offset=0):
 #
 #     return newsino
 
-def sino_window_and_circ_block(sinogram,angles,diameter,window_dim,num_stack=1,stack_offset=0):
+def sino_window_and_circ_block(sinogram,angles,slice_dim,diameter,num_stack=1,stack_offset=0,center_offset=0):
     """
     Modify a sinogram to simulate CT through window
 
@@ -158,7 +158,7 @@ def sino_window_and_circ_block(sinogram,angles,diameter,window_dim,num_stack=1,s
         newsinogram(ndarray): 2D sinogram with regions set to zero were window edges would block
 
     """
-    num_rows, num_cols = window_dim #(# of slices, # of channels)
+    num_rows, num_cols = slice_dim #(# of slices, # of channels)
     #make copy
     newsino=sinogram.copy()
     num_channel=newsino.shape[2]
@@ -176,7 +176,7 @@ def sino_window_and_circ_block(sinogram,angles,diameter,window_dim,num_stack=1,s
         oldsino=newsino.copy()
 
         # do beam circle thing
-        newsino[i,:,:]+=multi_circ_block(oldsino[i,:,:],diameter,num_stack,stack_offset)
+        newsino[i,:,:]=multi_circ_block(oldsino[i,:,:],diameter,num_stack,stack_offset,center_offset*np.sin(-theta))
 
     return newsino
 
@@ -231,7 +231,7 @@ def grid_rescale_and_pad(arr,rescale_factor,upsample_factor=1,center_offset=0,mo
     scaled_arr = np.nan_to_num(interp(col_interpts))
     return scaled_arr
 
-def ARC_sino_transform(sino,angles,gamma,mu=1,center_offset=0,monotonic=False):
+def ARC_sino_transform_old(sino,angles,gamma,mu=1,center_offset=0,monotonic=False):
     num_channels=sino.shape[2] #
     num_slices = sino.shape[1] #1
     new_channels=int(round(num_channels*mu))
@@ -251,6 +251,19 @@ def ARC_sino_transform(sino,angles,gamma,mu=1,center_offset=0,monotonic=False):
 
         sino_tilde[thetaidx,:,:]=beta*grid_rescale_and_pad(sino[thetaidx,:,:],alpha,mu,center_offset=center_offset,monotonic=monotonic)
 
+        new_angles[thetaidx]=theta_tilde
+    return sino_tilde, new_angles
+
+def ARC_sino_transform(sino,angles,gamma,mu=1,center_offset=0):
+    num_channels=sino.shape[2] #
+    num_slices = sino.shape[1] #1
+    new_channels=int(round(num_channels*mu))
+    sino_tilde= np.zeros((sino.shape[0],num_slices,new_channels))
+    new_angles=np.zeros(angles.shape)
+    for thetaidx, theta in enumerate(angles):
+        theta_tilde= np.arctan2(gamma*np.sin(theta),np.cos(theta))
+        alpha= np.sqrt((gamma**2)*(np.sin(theta)**2)+np.cos(theta)**2)
+        sino_tilde[thetaidx,:,:]=(alpha/gamma)*grid_rescale_and_pad(sino[thetaidx,:,:],alpha,mu,center_offset=center_offset)
         new_angles[thetaidx]=theta_tilde
     return sino_tilde, new_angles
 
