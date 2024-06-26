@@ -231,28 +231,28 @@ def grid_rescale_and_pad(arr,rescale_factor,upsample_factor=1,center_offset=0,mo
     scaled_arr = np.nan_to_num(interp(col_interpts))
     return scaled_arr
 
-def ARC_sino_transform_old(sino,angles,gamma,mu=1,center_offset=0,monotonic=False):
-    num_channels=sino.shape[2] #
-    num_slices = sino.shape[1] #1
-    new_channels=int(round(num_channels*mu))
-    sino_tilde= np.zeros((sino.shape[0],num_slices,new_channels))
-    new_angles=np.zeros(angles.shape)
-    for thetaidx, theta in enumerate(angles):
-        if theta==np.pi/2:
-            theta_tilde= np.pi/2
-        else:
-            theta_tilde= np.arctan2(gamma*np.sin(theta),np.cos(theta))
-
-        beta= np.sqrt((gamma**2)*(np.sin(theta)**2)+np.cos(theta)**2)/gamma
-        if theta_tilde==0:
-            alpha=gamma
-        else:
-            alpha= gamma*np.sin(theta)/np.sin(theta_tilde)
-
-        sino_tilde[thetaidx,:,:]=beta*grid_rescale_and_pad(sino[thetaidx,:,:],alpha,mu,center_offset=center_offset,monotonic=monotonic)
-
-        new_angles[thetaidx]=theta_tilde
-    return sino_tilde, new_angles
+# def ARC_sino_transform_old(sino,angles,gamma,mu=1,center_offset=0,monotonic=False):
+#     num_channels=sino.shape[2] #
+#     num_slices = sino.shape[1] #1
+#     new_channels=int(round(num_channels*mu))
+#     sino_tilde= np.zeros((sino.shape[0],num_slices,new_channels))
+#     new_angles=np.zeros(angles.shape)
+#     for thetaidx, theta in enumerate(angles):
+#         if theta==np.pi/2:
+#             theta_tilde= np.pi/2
+#         else:
+#             theta_tilde= np.arctan2(gamma*np.sin(theta),np.cos(theta))
+#
+#         beta= np.sqrt((gamma**2)*(np.sin(theta)**2)+np.cos(theta)**2)/gamma
+#         if theta_tilde==0:
+#             alpha=gamma
+#         else:
+#             alpha= gamma*np.sin(theta)/np.sin(theta_tilde)
+#
+#         sino_tilde[thetaidx,:,:]=beta*grid_rescale_and_pad(sino[thetaidx,:,:],alpha,mu,center_offset=center_offset,monotonic=monotonic)
+#
+#         new_angles[thetaidx]=theta_tilde
+#     return sino_tilde, new_angles
 
 def ARC_sino_transform(sino,angles,gamma,mu=1,center_offset=0):
     num_channels=sino.shape[2] #
