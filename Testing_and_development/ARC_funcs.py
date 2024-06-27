@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from math import floor, ceil
-from scipy.interpolate import PchipInterpolator, CubicSpline
+from scipy.interpolate import CubicSpline
 
 
 def gen_wind_tunnel3(num_slices, num_rows, num_cols, left_freq=14, right_freq=16, center_rod=False):
@@ -34,9 +34,11 @@ def gen_wind_tunnel3(num_slices, num_rows, num_cols, left_freq=14, right_freq=16
     right_amp=0.1
     left_amp=0.05
     #add left squiggle
-    image += ( (
+    image += ( ( (
             x_grid <= right_amp * np.sin(y_grid * 2 * np.pi * right_freq / 4) + right_mid+right_thick) & (
-                      x_grid >= 0.1 * np.sin(y_grid * 2 * np.pi * right_freq / 4) + right_mid-right_thick)) * 5
+                      x_grid >= 0.1 * np.sin(y_grid * 2 * np.pi * right_freq / 4) + right_mid-right_thick) ) & ( (
+            z_grid <= right_amp * np.sin(y_grid * 2 * np.pi * right_freq / 4) + right_mid+right_thick) & (
+                      z_grid >= 0.1 * np.sin(y_grid * 2 * np.pi * right_freq / 4) + right_mid-right_thick) ) ) * 5
     #add right squiggle
     image += ( (
             x_grid >= left_amp * np.sin(y_grid * 2 * np.pi * left_freq / 4) + left_mid - left_thick) & (
