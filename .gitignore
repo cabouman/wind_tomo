@@ -139,7 +139,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-
-/Testing_and_development/JAXMBIR_testing.ipynb
+/Testing_and_development/New_phantom.gif
+/Testing_and_development/Wind_Tunnel_Overlap.gif
 /Testing_and_development/Results_Data
 /Testing_and_development/Display.py
