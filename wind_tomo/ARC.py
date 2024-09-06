@@ -8,18 +8,17 @@ def ift3(X,scale=1):
 
 def ft_phase_volume(r0, N, delta, L0=np.inf, l0=0.0):
     """
-    Generate phase volume
-
+    Generate phase volume consistent with random draw of atmospheric turbulence.
 
     Args:
         r0 (float): Fried's coherence length [m]
-        N (int): screen size (NxN)
+        N (int): Volume size (NxNxN)
         delta (float): grid sampling interval in [m]
         L0 (float, optional): [inf] von Karman PSD, one over outer scale frequency [m]
         l0 (float, optional): [0] von Karman PSD, one over inner scale frequency [m]
 
     Returns:
-        ndarray (float): NxNxN phase screen
+        ndarray (float): NxNxN phase Volume
     """
 
     # setup the PSD
