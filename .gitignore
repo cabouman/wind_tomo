@@ -144,4 +144,9 @@ dmypy.json
 /Testing_and_development/Results_Data
 /Testing_and_development/Display.py
 
-/Testing_and_development/JAXMBIR_testing.ipynb
+/Testing_and_development/Data_and_Notebooks/JAXMBIR_testing.ipynb
+/Testing_and_development/Data_and_Notebooks/angle_tilt_vec.npy
+/Testing_and_development/Data_and_Notebooks/angle_view_sweep_nrmse.npy
+/Testing_and_development/Data_and_Notebooks/angle_view_sweep_recons.npy
+/Testing_and_development/Data_and_Notebooks/num_views_vec.npy
+/Testing_and_development/Data_and_Notebooks/
