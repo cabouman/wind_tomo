@@ -1,6 +1,99 @@
 import numpy as np
 from scipy.interpolate import CubicSpline
 from scipy.interpolate import interp1d
+import jax
+import mbirjax
+import jax.numpy as jnp
+import scipy.signal as signal
+
+def gaussian_kernel2d(stdev, truncation=4, normalised=True):
+    '''
+    Generates a n x n matrix with a centered gaussian
+    of standard deviation std centered on it. If normalised,
+    its volume equals 1.'''
+    gaussian1D = signal.windows.gaussian(1+2*np.ceil(truncation*stdev).astype(int), stdev)
+    gaussian2D = np.outer(gaussian1D, gaussian1D)
+    if normalised:
+        gaussian2D /= np.sum(gaussian2D)
+    return gaussian2D
+
+
+def convolve2D(recon,kern):
+    '''
+    Returns the convolution of two 2D arrays.
+     Uses same boundary condition'''
+    return jax.scipy.signal.convolve2d(recon,kern,'same')
+
+
+#vmap convolve2D along a third axis and jit
+v_2Dconvolve=jax.jit(jax.vmap(convolve2D,in_axes=[0, None],out_axes=0))
+
+
+def Gaussian_filter_and_zero_out_btw_screens(recon,kernel,screen_ind):
+    '''
+    Sets xz-planes (of recon) to zero at all index locations along
+    the y-axis NOT included in the list screen_ind. Also performs 2D
+    convolutional filtering with kernel of the xz-planes (of recon) at
+    all index locations along the y-axis that ARE included in the list
+    screen_ind.
+    Args:
+        recon (ndarray): jax numpy 3D Phantom (y,x,z) with 2D phase screens along first axis y
+        kernel (ndarray): 2D convolution kernel
+        screen_ind (list, int): list of int index location for the placement of the phase screens
+
+    Returns:
+        ndarray (float): Modified jax numpy 3D Phantom (y,x,z)
+    '''
+
+    #zero out
+    ind_to_zero=list(set([i for i in range(recon.shape[0])]).difference(screen_ind))
+    recon=recon.at[ind_to_zero,:,:].set(0)
+    #filter
+    recon=recon.at[screen_ind,:,:].set(v_2Dconvolve(recon[screen_ind,:,:],kernel))
+    return recon
+
+
+def Gaussian_plugandplay_for_screens(ct_model,sinogram,weights,sigma,screen_ind,truncate=4,num_iterations=3):
+    '''
+    Performs Plug-and-Play tomography reconstruction with a prior model that performs Gaussian filtering for the xy-planes along the y-axis at index locations given by screen_ind and zeroes out all other planes along the y-axis.
+    Args:
+        ct_model (mbirjax.TomographyModel): Instance of TomographyModel class from mbirjax
+        sinogram (ndarray): jax numpy sinogram array
+        weights (ndarray): jax numpy sinogram weights array.
+        sigma (float): parameter for the amount of gaussian blurring. stand dev of gaussian kernel in pixels
+        screen_ind (list, int): list of int index location for the placement of the phase screens
+        truncate (int, optional): number of sigma values at which to truncate gaussian kernel
+        num_iterations (int, optional): number of iterations to perform for ct_model.prox_map()
+
+    Returns:
+        ndarray (float): jax numpy 3D reconstruction
+    '''
+    #make kernel
+    kernel= jnp.array(gaussian_kernel2d(sigma,truncate))
+
+    #initialize arrays
+    x=jnp.zeros(ct_model.get_params('recon_shape'))
+    u=jnp.zeros(ct_model.get_params('recon_shape'))
+    v=jnp.zeros(ct_model.get_params('recon_shape'))
+    #PnP loop
+    error=1000
+    iter=0
+    while error>0.1 and iter<700:
+        x,_=ct_model.prox_map(v-u,sinogram,weights,num_iterations=num_iterations,init_recon=v)
+        v=Gaussian_filter_and_zero_out_btw_screens(x+u,kernel,screen_ind)
+        u = u + (x-v)
+        #Determine convergence or divergence
+        errornew=np.linalg.norm(x - v)
+        if errornew<=error:
+            error=errornew
+        else:
+            break
+        #Print change every 5 iterations
+        iter+=1
+        if iter%5==0:
+            print(f"iteration {iter}: change {error}")
+    return x
+
 
 def ift3(X,scale=1):
     return np.fft.ifftshift(np.fft.ifftn(np.fft.ifftshift(X))) * scale
@@ -257,7 +350,7 @@ def weights_window_and_circ_block(sinogram_shape,angles,diameter,num_stack=1,sta
         oldsino=newsino.copy()
 
         # do beam circle thing
-        newsino[i,:,:]=multi_circ_block(oldsino[i,:,:],diameter,num_stack,stack_offset,center_offset*np.sin(-theta))
+        newsino[i,:,:]=multi_circ_block(oldsino[i,:,:],diameter,num_stack,stack_offset,-center_offset*np.sin(theta))
 
     return newsino
 
