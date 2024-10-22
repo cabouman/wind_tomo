@@ -100,15 +100,51 @@ def Gaussian_filter_and_zero_out_btw_screens(recon,kernel,screen_ind):
         ndarray (float): Modified jax numpy 3D Phantom (y,x,z)
     '''
 
-    #zero out
-    ind_to_zero=list(set([i for i in range(recon.shape[0])]).difference(screen_ind))
-    recon=recon.at[ind_to_zero,:,:].set(0)
-    #filter
-    recon=recon.at[screen_ind,:,:].set(v_2Dconvolve(recon[screen_ind,:,:],kernel))
+    # zero out
+    reconnew = jnp.zeros(recon.shape)
+    # filter
+    recon = reconnew.at[screen_ind, :, :].set(v_2Dconvolve(recon[screen_ind, :, :], kernel))
     return recon
 
 
-def Gaussian_plugandplay_for_screens(ct_model,sinogram,weights,sigma,screen_ind,truncate=4,num_iterations=3):
+def plugandplay_for_screens(ct_model, sinogram, weights, screen_ind, num_iterations=10):
+    '''
+        Performs Plug-and-Play tomography reconstruction with a prior model that zeroes out all planes along the y-axis that are not given by screen_ind.
+        Args:
+            ct_model (mbirjax.TomographyModel): Instance of TomographyModel class from mbirjax
+            sinogram (ndarray): jax numpy sinogram array
+            weights (ndarray): jax numpy sinogram weights array.
+            screen_ind (list, int): list of int index location for the placement of the phase screens
+            num_iterations (int, optional): number of iterations to perform for ct_model.prox_map()
+
+        Returns:
+            ndarray (float): jax numpy 3D reconstruction
+            err_vec (list): list of iteration step sizes.
+        '''
+
+    x = jnp.zeros(ct_model.get_params('recon_shape'))
+
+    ind_to_zero = list(set([i for i in range(x.shape[0])]).difference(screen_ind))
+
+    # initialize arrays
+    u = jnp.zeros(ct_model.get_params('recon_shape'))
+    v = jnp.zeros(ct_model.get_params('recon_shape'))
+    err_vec = []
+    error = 1000
+    iter = 0
+    while error > 0.25 and iter < 700:
+        x, _ = ct_model.prox_map(v - u, sinogram, weights, num_iterations=num_iterations, init_recon=x)
+        v = v.at[:, :, :].set(0)
+        v = v.at[screen_ind, :, :].set((x + u)[screen_ind, :, :])
+        u = u + (x - v)
+        error = np.linalg.norm(x - v)
+        err_vec.append(error)
+        iter += 1
+        if iter % 10 == 0:
+            print(f"iteration {iter}: change {error}")
+    return x, err_vec
+
+def Gaussian_plugandplay_for_screens(ct_model, sinogram, weights, sigma, truncate, screen_ind, num_iterations=10):
     '''
     Performs Plug-and-Play tomography reconstruction with a prior model that performs Gaussian filtering for the xy-planes along the y-axis at index locations given by screen_ind and zeroes out all other planes along the y-axis.
     Args:
@@ -123,31 +159,28 @@ def Gaussian_plugandplay_for_screens(ct_model,sinogram,weights,sigma,screen_ind,
     Returns:
         ndarray (float): jax numpy 3D reconstruction
     '''
-    #make kernel
-    kernel= jnp.array(gaussian_kernel2d(sigma,truncate))
 
-    #initialize arrays
-    x=jnp.zeros(ct_model.get_params('recon_shape'))
-    u=jnp.zeros(ct_model.get_params('recon_shape'))
-    v=jnp.zeros(ct_model.get_params('recon_shape'))
-    #PnP loop
-    error=1000
-    iter=0
-    while error>0.1 and iter<700:
-        x,_=ct_model.prox_map(v-u,sinogram,weights,num_iterations=num_iterations,init_recon=v)
-        v=Gaussian_filter_and_zero_out_btw_screens(x+u,kernel,screen_ind)
-        u = u + (x-v)
-        #Determine convergence or divergence
-        errornew=np.linalg.norm(x - v)
-        if errornew<=error:
-            error=errornew
-        else:
-            break
-        #Print change every 5 iterations
-        iter+=1
-        if iter%5==0:
+    # make kernel
+    kernel = jnp.array(gaussian_kernel2d(sigma, truncate))
+
+    # initialize arrays
+    x = jnp.zeros(ct_model.get_params('recon_shape'))
+    u = jnp.zeros(ct_model.get_params('recon_shape'))
+    v = jnp.zeros(ct_model.get_params('recon_shape'))
+    err_vec = []
+    error = 1000
+    iter = 0
+    while error > 0.25 and iter < 700:
+        x, _ = ct_model.prox_map(v - u, sinogram, weights, num_iterations=num_iterations, init_recon=v)
+        v = Gaussian_filter_and_zero_out_btw_screens(x + u, kernel, screen_ind)
+        u = u + (x - v)
+        error = np.linalg.norm(x - v)
+        iter += 1
+        if iter % 10 == 0:
             print(f"iteration {iter}: change {error}")
-    return x
+        err_vec.append(error)
+
+    return x, err_vec
 
 
 def ift3(X,scale=1):
