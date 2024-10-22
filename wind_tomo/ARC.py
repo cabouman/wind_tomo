@@ -5,6 +5,61 @@ import jax
 import mbirjax
 import jax.numpy as jnp
 import scipy.signal as signal
+from numpy.linalg import lstsq
+
+def remove_tip_tilt(arr, axis=None):
+    """
+    Remove tip-tilt and piston from a 2D array or from all 2D arrays along a specified axis if a 3d array is supplied.
+
+    Parameters:
+    arr (numpy.ndarray): Input 2D or 3D array.
+    axis (int, optional): Axis along which to remove the trend in case of 3D array. Default is None.
+
+    Returns:
+    numpy.ndarray: Array with linear trends removed.
+    """
+
+    def fit_plane_2d(data, mask):
+        """Fit and subtract a plane from 2D data."""
+        m, n = data.shape
+        X, Y = np.meshgrid(np.arange(n), np.arange(m))
+        A = np.c_[X[mask].ravel(), Y[mask].ravel(), np.ones(mask.sum())]
+        C, _, _, _ = lstsq(A, data[mask].ravel(), rcond=None)
+        plane = (C[0] * X + C[1] * Y + C[2]).reshape(m, n)
+        return data - plane
+
+    def fit_plane_3d(data, mask, axis):
+        """Fit and subtract planes from 3D data along the specified axis."""
+        if axis == 0:
+            for i in range(data.shape[0]):
+                data[i] = fit_plane_2d(data[i], mask[i])
+        elif axis == 1:
+            for i in range(data.shape[1]):
+                data[:, i] = fit_plane_2d(data[:, i], mask[:, i])
+        elif axis == 2:
+            for i in range(data.shape[2]):
+                data[:, :, i] = fit_plane_2d(data[:, :, i], mask[:, :, i])
+        return data
+
+    if np.ma.is_masked(arr):
+        mask = ~arr.mask
+        arr = arr.filled(fill_value=np.nan)
+    else:
+        mask = np.ones_like(arr, dtype=bool)
+
+    if arr.ndim == 2:
+        result = fit_plane_2d(arr, mask)
+    elif arr.ndim == 3:
+        if axis is None:
+            raise ValueError("Axis must be specified for 3D arrays.")
+        result = fit_plane_3d(arr, mask, axis)
+    else:
+        raise ValueError("Input array must be 2D or 3D.")
+
+    if np.isnan(result).any():
+        result = np.ma.masked_invalid(result)
+
+    return result
 
 def gaussian_kernel2d(stdev, truncation=4, normalised=True):
     '''
