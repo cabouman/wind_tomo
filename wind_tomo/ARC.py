@@ -6,6 +6,103 @@ import mbirjax
 import jax.numpy as jnp
 import scipy.signal as signal
 from numpy.linalg import lstsq
+import numpy.ma as ma
+from scipy.special import factorial
+
+def zernike_radial(m, n, rho):
+    """
+    Calculate the radial component of Zernike polynomial (m, n) on the grid rho.
+    """
+    if (n - m) % 2:
+        return rho * 0.0
+    wf = 0.0
+    for k in range((n - m) // 2 + 1):
+        wf += rho ** (n - 2 * k) * (-1) ** k * factorial(n - k) / (
+            factorial(k) * factorial((n + m) // 2 - k) * factorial((n - m) // 2 - k)
+        )
+    return wf
+
+def zernike(m, n, rho, theta):
+    """
+    Calculate the Zernike polynomial (m, n) on the grid (rho, theta).
+    """
+    if m > 0:
+        return zernike_radial(m, n, rho) * np.cos(m * theta)
+    elif m < 0:
+        return zernike_radial(-m, n, rho) * np.sin(-m * theta)
+    else:
+        return zernike_radial(0, n, rho)
+
+def zernike_decomposition(image, mask, max_order):
+    """
+    Perform Zernike decomposition on a masked image.
+
+    Parameters:
+        image (2D array): The input masked image.
+        mask (2D array): The circular aperture mask.
+        max_order (int): The highest order of Zernike polynomials to be fitted.
+
+    Returns:
+        coefficients (list of tuples): The Zernike coefficients in order of smallest order to largest order,
+                                       grouped by radial degree.
+    """
+    # Create a grid of coordinates
+    y, x = np.indices(image.shape)
+    y = y - image.shape[0] / 2
+    x = x - image.shape[1] / 2
+    rho = np.sqrt(x**2 + y**2) / (image.shape[0] / 2)
+    theta = np.arctan2(y, x)
+
+    # Apply the mask
+    masked_image = image * mask
+
+    # Initialize the list of coefficients
+    coefficients = []
+
+    # Loop over the orders and calculate the coefficients
+    for n in range(max_order + 1):
+        radial_coefficients = []
+        for m in range(-n, n + 1, 2):
+            Z = zernike(m, n, rho, theta)
+            Z *= mask
+            coefficient = (masked_image * Z).sum() / (Z**2).sum()
+            radial_coefficients.append(coefficient)
+        coefficients.append(tuple(radial_coefficients))
+
+    return coefficients
+
+def zernike_composition(coefficients, mask):
+    """
+    Generate a 2D image from Zernike coefficients.
+
+    Parameters:
+        coefficients (list of tuples): The Zernike coefficients grouped by radial degree.
+        mask (2D array): The circular aperture mask.
+
+    Returns:
+        composition (2D array): The composition of Zernike polynomials as a 2D image.
+    """
+    # Create a grid of coordinates
+    y, x = np.indices(mask.shape)
+    y = y - mask.shape[0] / 2
+    x = x - mask.shape[1] / 2
+    rho = np.sqrt(x**2 + y**2) / (mask.shape[0] / 2)
+    theta = np.arctan2(y, x)
+
+    # Initialize the composition image
+    composition = np.zeros(mask.shape)
+
+    # Loop over the orders and add the contributions from each Zernike polynomial
+    for n, radial_coefficients in enumerate(coefficients):
+        for m_index, coefficient in enumerate(radial_coefficients):
+            m = -n + 2 * m_index
+            Z = zernike(m, n, rho, theta)
+            composition += coefficient * Z
+
+    # Apply the mask to the composition image
+    composition *= mask
+
+    return ma.masked_where(~mask,composition)
 
 def remove_tip_tilt(arr, axis=None):
     """
