@@ -11,98 +11,132 @@ from scipy.special import factorial
 
 def zernike_radial(m, n, rho):
     """
-    Calculate the radial component of Zernike polynomial (m, n) on the grid rho.
+    Calculate the radial component of Zernike polynomial (m, n) on the unit disk.
     """
-    if (n - m) % 2:
-        return rho * 0.0
-    wf = 0.0
+    if (n - m) % 2 != 0:
+        return np.zeros_like(rho)
+    radial = np.zeros_like(rho)
     for k in range((n - m) // 2 + 1):
-        wf += rho ** (n - 2 * k) * (-1) ** k * factorial(n - k) / (
+        radial += rho**(n - 2*k) * (-1)**k * factorial(n - k) / (
             factorial(k) * factorial((n + m) // 2 - k) * factorial((n - m) // 2 - k)
         )
-    return wf
+    return radial
 
-def zernike(m, n, rho, theta):
+def zernike_polynomial(m, n, rho, theta):
     """
-    Calculate the Zernike polynomial (m, n) on the grid (rho, theta).
+    Calculate the normalized Zernike polynomial (m, n) on the unit disk.
     """
-    if m > 0:
-        return zernike_radial(m, n, rho) * np.cos(m * theta)
-    elif m < 0:
-        return zernike_radial(-m, n, rho) * np.sin(-m * theta)
+    radial = zernike_radial(abs(m), n, rho)
+    if m == 0:
+        Zmn = radial
+    elif m > 0:
+        Zmn = radial * np.cos(m * theta)
     else:
-        return zernike_radial(0, n, rho)
+        Zmn = radial * np.sin(abs(m) * theta)
 
-def zernike_decomposition(image, mask, max_order):
+    # Normalize Zmn to have unit length
+    norm = np.sqrt(np.sum(Zmn**2))
+    Zmn /= norm
+
+    return Zmn
+
+def fit_zernike(image, max_radial_degree, pixel_diameter=None):
     """
-    Perform Zernike decomposition on a masked image.
+    Fit Zernike polynomials to a 2D image over a disk.
 
     Parameters:
-        image (2D array): The input masked image.
-        mask (2D array): The circular aperture mask.
-        max_order (int): The highest order of Zernike polynomials to be fitted.
+        image (2D array): The input image.
+        max_radial_degree (int): The maximum radial degree of Zernike polynomials.
+        pixel_diameter (int, optional): The pixel diameter of the disk. Defaults to the minimum side length of the image.
 
     Returns:
-        coefficients (list of tuples): The Zernike coefficients in order of smallest order to largest order,
-                                       grouped by radial degree.
+        list of tuples: Zernike coefficients organized by radial degree.
     """
-    # Create a grid of coordinates
-    y, x = np.indices(image.shape)
-    y = y - image.shape[0] / 2
-    x = x - image.shape[1] / 2
-    rho = np.sqrt(x**2 + y**2) / (image.shape[0] / 2)
-    theta = np.arctan2(y, x)
+    # Get the dimensions of the image
+    height, width = image.shape
 
-    # Apply the mask
-    masked_image = image * mask
+    # Set pixel_diameter to the minimum side length if not provided
+    if pixel_diameter is None:
+        pixel_diameter = min(height, width)
 
-    # Initialize the list of coefficients
-    coefficients = []
+    # Determine the center and radius of the disk
+    center_y, center_x = height // 2, width // 2
+    radius = pixel_diameter // 2
 
-    # Loop over the orders and calculate the coefficients
-    for n in range(max_order + 1):
-        radial_coefficients = []
+    # Create coordinate grids
+    y, x = np.ogrid[:height, :width]
+
+    # Calculate normalized coordinates within the disk
+    rho = np.sqrt((x - center_x)**2 + (y - center_y)**2)/ radius
+    theta = np.arctan2(y - center_y, x - center_x)
+
+    # Create a mask for the disk
+    mask = rho <= 1
+
+    # Initialize list to store Zernike coefficients
+    zernike_coeffs = []
+
+    # Iterate over each radial degree
+    for n in range(max_radial_degree + 1):
+        coeffs_n = []
         for m in range(-n, n + 1, 2):
-            Z = zernike(m, n, rho, theta)
-            Z *= mask
-            coefficient = (masked_image * Z).sum() / (Z**2).sum()
-            radial_coefficients.append(coefficient)
-        coefficients.append(tuple(radial_coefficients))
+            # Calculate normalized Zernike polynomial (m, n) on the masked region
+            Zmn = zernike_polynomial(m, n, rho[mask], theta[mask])
 
-    return coefficients
+            # Flatten the masked image and Zernike polynomial
+            image_flat = image[mask].flatten()
+            Zmn_flat = Zmn.flatten()
 
-def zernike_composition(coefficients, mask):
+            # Calculate the coefficient using inner product
+            coeff = np.dot(image_flat, Zmn_flat)
+
+            coeffs_n.append(coeff)
+
+        zernike_coeffs.append(tuple(coeffs_n))
+
+    return zernike_coeffs
+
+def reconstruct_image(zernike_coeffs, pixel_diameter):
     """
-    Generate a 2D image from Zernike coefficients.
+    Reconstruct a 2D image from Zernike coefficients.
 
     Parameters:
-        coefficients (list of tuples): The Zernike coefficients grouped by radial degree.
-        mask (2D array): The circular aperture mask.
+        zernike_coeffs (list of tuples): Zernike coefficients organized by radial degree.
+        pixel_diameter (int): The pixel diameter of the disk.
 
     Returns:
-        composition (2D array): The composition of Zernike polynomials as a 2D image.
+        np.ma.MaskedArray: Reconstructed 2D image with the region outside the inner disc masked.
     """
-    # Create a grid of coordinates
-    y, x = np.indices(mask.shape)
-    y = y - mask.shape[0] / 2
-    x = x - mask.shape[1] / 2
-    rho = np.sqrt(x**2 + y**2) / (mask.shape[0] / 2)
-    theta = np.arctan2(y, x)
+    # Determine the radius of the disk
+    radius = pixel_diameter // 2
 
-    # Initialize the composition image
-    composition = np.zeros(mask.shape)
+    # Create coordinate grids
+    y, x = np.ogrid[:pixel_diameter, :pixel_diameter]
 
-    # Loop over the orders and add the contributions from each Zernike polynomial
-    for n, radial_coefficients in enumerate(coefficients):
-        for m_index, coefficient in enumerate(radial_coefficients):
-            m = -n + 2 * m_index
-            Z = zernike(m, n, rho, theta)
-            composition += coefficient * Z
+    # Calculate normalized coordinates within the disk
+    center_y, center_x = pixel_diameter // 2, pixel_diameter // 2
+    rho = np.sqrt((x - center_x)**2 + (y - center_y)**2) / radius
+    theta = np.arctan2(y - center_y, x - center_x)
 
-    # Apply the mask to the composition image
-    composition *= mask
+    # Create a mask for the disk
+    mask = rho <= 1
 
-    return ma.masked_where(~mask,composition)
+    # Initialize the reconstructed image
+    reconstructed_image = np.zeros((pixel_diameter, pixel_diameter), dtype=np.float64)
+
+    # Iterate over each tuple in the list of coefficients
+    for coeffs in zernike_coeffs:
+        n = len(coeffs) - 1
+        for m_index, coeff in enumerate(coeffs):
+            m = 2 * m_index - n
+            if coeff != 0:
+                Zmn = zernike_polynomial(m, n, rho[mask], theta[mask])
+                reconstructed_image[mask] += coeff * Zmn
+
+    # Create a masked array with the region outside the inner disc masked
+    reconstructed_image = np.ma.masked_array(reconstructed_image, mask=~mask)
+
+    return reconstructed_image
 
 def remove_tip_tilt(arr, axis=None):
     """
