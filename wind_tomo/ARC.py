@@ -8,6 +8,65 @@ import scipy.signal as signal
 from numpy.linalg import lstsq
 import numpy.ma as ma
 from scipy.special import factorial
+from scipy.ndimage import gaussian_filter
+
+
+def remove_tip_tilt(arr, axis=None):
+    """
+    Remove tip-tilt from a 2D or 3D numpy array and ensure zero mean.
+
+    Parameters:
+    arr (numpy.ndarray): Input 2D or 3D array.
+    axis (int, optional): Axis along which to remove the trend in case of 3D array. Default is None.
+
+    Returns:
+    numpy.ndarray: Array with linear trends removed and zero mean.
+    """
+
+    def fit_plane_2d(data, mask):
+        """Fit and subtract a plane from 2D data."""
+        m, n = data.shape
+        X, Y = np.meshgrid(np.arange(n), np.arange(m))
+        A = np.c_[X[mask].ravel(), Y[mask].ravel(), np.ones(mask.sum())]
+        C, _, _, _ = lstsq(A, data[mask].ravel(), rcond=None)
+        plane = (C[0] * X + C[1] * Y + C[2]).reshape(m, n)
+        return data - plane
+
+    def fit_plane_3d(data, mask, axis):
+        """Fit and subtract planes from 3D data along the specified axis."""
+        if axis == 0:
+            for i in range(data.shape[0]):
+                data[i] = fit_plane_2d(data[i], mask[i])
+        elif axis == 1:
+            for i in range(data.shape[1]):
+                data[:, i] = fit_plane_2d(data[:, i], mask[:, i])
+        elif axis == 2:
+            for i in range(data.shape[2]):
+                data[:, :, i] = fit_plane_2d(data[:, :, i], mask[:, :, i])
+        return data
+
+    was_masked = np.ma.is_masked(arr)
+
+    if was_masked:
+        mask = ~arr.mask
+        arr = arr.data.copy()  # Work with a writable copy of the data
+    else:
+        mask = np.ones_like(arr, dtype=bool)
+
+    if arr.ndim == 2:
+        result = fit_plane_2d(arr, mask)
+    elif arr.ndim == 3:
+        if axis is None:
+            raise ValueError("Axis must be specified for 3D arrays.")
+        result = fit_plane_3d(arr, mask, axis)
+    else:
+        raise ValueError("Input array must be 2D or 3D.")
+
+    if was_masked:
+        result = np.ma.array(result, mask=~mask)
+
+    return result
+
 
 def zernike_radial(m, n, rho):
     """
@@ -17,10 +76,11 @@ def zernike_radial(m, n, rho):
         return np.zeros_like(rho)
     radial = np.zeros_like(rho)
     for k in range((n - m) // 2 + 1):
-        radial += rho**(n - 2*k) * (-1)**k * factorial(n - k) / (
-            factorial(k) * factorial((n + m) // 2 - k) * factorial((n - m) // 2 - k)
+        radial += rho ** (n - 2 * k) * (-1) ** k * factorial(n - k) / (
+                factorial(k) * factorial((n + m) // 2 - k) * factorial((n - m) // 2 - k)
         )
     return radial
+
 
 def zernike_polynomial(m, n, rho, theta):
     """
@@ -34,11 +94,11 @@ def zernike_polynomial(m, n, rho, theta):
     else:
         Zmn = radial * np.sin(abs(m) * theta)
 
-    # Normalize Zmn to have unit length
-    norm = np.sqrt(np.sum(Zmn**2))
-    Zmn /= norm
+    if n != 0:
+        Zmn = Zmn - np.average(Zmn[rho <= 1])
 
     return Zmn
+
 
 def fit_zernike(image, max_radial_degree, pixel_diameter=None):
     """
@@ -67,7 +127,7 @@ def fit_zernike(image, max_radial_degree, pixel_diameter=None):
     y, x = np.ogrid[:height, :width]
 
     # Calculate normalized coordinates within the disk
-    rho = np.sqrt((x - center_x)**2 + (y - center_y)**2)/ radius
+    rho = np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2) / radius
     theta = np.arctan2(y - center_y, x - center_x)
 
     # Create a mask for the disk
@@ -88,13 +148,14 @@ def fit_zernike(image, max_radial_degree, pixel_diameter=None):
             Zmn_flat = Zmn.flatten()
 
             # Calculate the coefficient using inner product
-            coeff = np.dot(image_flat, Zmn_flat)
+            coeff, _, _, _ = lstsq(Zmn_flat[:, np.newaxis], image_flat, rcond=None)
 
             coeffs_n.append(coeff)
 
         zernike_coeffs.append(tuple(coeffs_n))
 
     return zernike_coeffs
+
 
 def reconstruct_image(zernike_coeffs, pixel_diameter):
     """
@@ -115,7 +176,7 @@ def reconstruct_image(zernike_coeffs, pixel_diameter):
 
     # Calculate normalized coordinates within the disk
     center_y, center_x = pixel_diameter // 2, pixel_diameter // 2
-    rho = np.sqrt((x - center_x)**2 + (y - center_y)**2) / radius
+    rho = np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2) / radius
     theta = np.arctan2(y - center_y, x - center_x)
 
     # Create a mask for the disk
@@ -138,81 +199,65 @@ def reconstruct_image(zernike_coeffs, pixel_diameter):
 
     return reconstructed_image
 
-def remove_tip_tilt(arr, axis=None):
-    """
-    Remove tip-tilt and piston from a 2D array or from all 2D arrays along a specified axis if a 3d array is supplied.
 
-    Parameters:
-    arr (numpy.ndarray): Input 2D or 3D array.
-    axis (int, optional): Axis along which to remove the trend in case of 3D array. Default is None.
-
-    Returns:
-    numpy.ndarray: Array with linear trends removed.
-    """
-
-    def fit_plane_2d(data, mask):
-        """Fit and subtract a plane from 2D data."""
-        m, n = data.shape
-        X, Y = np.meshgrid(np.arange(n), np.arange(m))
-        A = np.c_[X[mask].ravel(), Y[mask].ravel(), np.ones(mask.sum())]
-        C, _, _, _ = lstsq(A, data[mask].ravel(), rcond=None)
-        plane = (C[0] * X + C[1] * Y + C[2]).reshape(m, n)
-        return data - plane
-
-    def fit_plane_3d(data, mask, axis):
-        """Fit and subtract planes from 3D data along the specified axis."""
-        if axis == 0:
-            for i in range(data.shape[0]):
-                data[i] = fit_plane_2d(data[i], mask[i])
-        elif axis == 1:
-            for i in range(data.shape[1]):
-                data[:, i] = fit_plane_2d(data[:, i], mask[:, i])
-        elif axis == 2:
-            for i in range(data.shape[2]):
-                data[:, :, i] = fit_plane_2d(data[:, :, i], mask[:, :, i])
-        return data
-
-    if np.ma.is_masked(arr):
-        mask = ~arr.mask
-        arr = arr.filled(fill_value=np.nan)
-    else:
-        mask = np.ones_like(arr, dtype=bool)
-
-    if arr.ndim == 2:
-        result = fit_plane_2d(arr, mask)
-    elif arr.ndim == 3:
-        if axis is None:
-            raise ValueError("Axis must be specified for 3D arrays.")
-        result = fit_plane_3d(arr, mask, axis)
-    else:
-        raise ValueError("Input array must be 2D or 3D.")
-
-    if np.isnan(result).any():
-        result = np.ma.masked_invalid(result)
-
-    return result
-
-def gaussian_kernel2d(stdev, truncation=4, normalised=True):
+def gaussian_kernel2d(nsig, truncation=4):
     '''
     Generates a n x n matrix with a centered gaussian
     of standard deviation std centered on it. If normalised,
     its volume equals 1.'''
-    gaussian1D = signal.windows.gaussian(1+2*np.ceil(truncation*stdev).astype(int), stdev)
-    gaussian2D = np.outer(gaussian1D, gaussian1D)
-    if normalised:
-        gaussian2D /= np.sum(gaussian2D)
-    return gaussian2D
+    kernlen = 1 + 2 * np.ceil(truncate * nsig).astype(int)
+    inp = np.zeros((kernlen, kernlen))
+    inp[kernlen // 2, kernlen // 2] = 1
+    return gaussian_filter(inp, nsig)
 
 
-def convolve2D(recon,kern):
-    '''
-    Returns the convolution of two 2D arrays.
-     Uses same boundary condition'''
-    return jax.scipy.signal.convolve2d(recon,kern,'same')
+def gaussian_kernel3d(nsig=np.array([3, 3, 3]), truncate=4):
+    """Returns a 3D Gaussian kernel array."""
+    kernlen = 1 + 2 * np.ceil(truncate * nsig).astype(int)
+    # create nxn zeros
+    inp = np.zeros(kernlen)
+    # set element at the middle to one, a dirac delta
+    inp[kernlen[0] // 2, kernlen[1] // 2, kernlen[2] // 2] = 1
+    # gaussian-smooth the dirac, resulting in a gaussian filter mask
+    filt = gaussian_filter(inp, nsig)
+
+    return filt
 
 
-#vmap convolve2D along a third axis and jit
-v_2Dconvolve=jax.jit(jax.vmap(convolve2D,in_axes=[0, None],out_axes=0))
+def Gaussian_plugandplay(ct_model, sinogram, weights, sigma, truncate, num_iterations, init_recon=0, convg=0.01,
+                         show_iter=25):
+    # make kernel
+    kernel = jnp.array(gaussian_kernel3d(sigma, truncate))
+
+    if isinstance(init_recon, int):
+        x = jnp.zeros(ct_model.get_params('recon_shape'))
+        v = jnp.zeros(ct_model.get_params('recon_shape'))
+    else:
+        x = init_recon
+        v = jax.scipy.signal.correlate(x, kernel, 'same')
+
+    # initialize arrays
+    u = jnp.zeros(ct_model.get_params('recon_shape'))
+    error = 1
+    iter = 0
+    while error > convg and iter < 3000:
+        x, _ = ct_model.prox_map(v - u, sinogram, weights, num_iterations=num_iterations, init_recon=x)
+        v = jax.scipy.signal.correlate(x + u, kernel, 'same')
+        u = u + (x - v)
+        error = np.linalg.norm(x - v)
+
+        iter += 1
+        if iter % show_iter == 0:
+            print(f"iteration {iter}: change {error}")
+
+    return x
+
+
+def convolve2D(recon, kern):
+    return jax.scipy.signal.convolve2d(recon, kern, 'same')
+
+
+v_2Dconvolve = jax.jit(jax.vmap(convolve2D, in_axes=[0, None], out_axes=0))
 
 
 def Gaussian_filter_and_zero_out_btw_screens(recon,kernel,screen_ind):
@@ -312,6 +357,35 @@ def Gaussian_plugandplay_for_screens(ct_model, sinogram, weights, sigma, truncat
         err_vec.append(error)
 
     return x, err_vec
+
+
+def Gaussian_plugandplay(ct_model, sinogram, weights, sigma, truncate, iterations, init_recon=0, convg=0.01,
+                         show_iter=25):
+    # make kernel
+    kernel = jnp.array(gaussian_kernel3d(sigma, truncate))
+
+    if isinstance(init_recon, int):
+        x = jnp.zeros(ct_model.get_params('recon_shape'))
+        v = jnp.zeros(ct_model.get_params('recon_shape'))
+    else:
+        x = init_recon
+        v = jax.scipy.signal.correlate(x, kernel, 'same')
+
+    # initialize arrays
+    u = jnp.zeros(ct_model.get_params('recon_shape'))
+    error = 1
+    iter = 0
+    while error > convg and iter < 3000:
+        x, _ = ct_model.prox_map(v - u, sinogram, weights, num_iterations=num_iterations, init_recon=x)
+        v = jax.scipy.signal.correlate(x + u, kernel, 'same')
+        u = u + (x - v)
+        error = np.linalg.norm(x - v)
+
+        iter += 1
+        if iter % show_iter == 0:
+            print(f"iteration {iter}: change {error}")
+
+    return x
 
 
 def ift3(X,scale=1):
