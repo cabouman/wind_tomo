@@ -359,34 +359,6 @@ def Gaussian_plugandplay_for_screens(ct_model, sinogram, weights, sigma, truncat
     return x, err_vec
 
 
-def Gaussian_plugandplay(ct_model, sinogram, weights, sigma, truncate, iterations, init_recon=0, convg=0.01,
-                         show_iter=25):
-    # make kernel
-    kernel = jnp.array(gaussian_kernel3d(sigma, truncate))
-
-    if isinstance(init_recon, int):
-        x = jnp.zeros(ct_model.get_params('recon_shape'))
-        v = jnp.zeros(ct_model.get_params('recon_shape'))
-    else:
-        x = init_recon
-        v = jax.scipy.signal.correlate(x, kernel, 'same')
-
-    # initialize arrays
-    u = jnp.zeros(ct_model.get_params('recon_shape'))
-    error = 1
-    iter = 0
-    while error > convg and iter < 3000:
-        x, _ = ct_model.prox_map(v - u, sinogram, weights, num_iterations=num_iterations, init_recon=x)
-        v = jax.scipy.signal.correlate(x + u, kernel, 'same')
-        u = u + (x - v)
-        error = np.linalg.norm(x - v)
-
-        iter += 1
-        if iter % show_iter == 0:
-            print(f"iteration {iter}: change {error}")
-
-    return x
-
 
 def ift3(X,scale=1):
     return np.fft.ifftshift(np.fft.ifftn(np.fft.ifftshift(X))) * scale
